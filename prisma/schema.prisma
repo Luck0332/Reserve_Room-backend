@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
 }
 
 datasource db {
@@ -8,34 +7,189 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model reserve_room {
-  id         Int       @id @default(autoincrement())
-  user_id    Int
-  room_id    Int
+model Reserve_roomM {
+  id         String    @id @default(uuid())
+  user_id    String
+  room_id    String
   check_in   DateTime  @db.Date
   check_out  DateTime  @db.Date
   status     String?   @default("reserved") @db.VarChar(20)
   created_at DateTime? @default(now()) @db.Timestamp(6)
-  rooms      rooms     @relation(fields: [room_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  room RoomsM @relation(fields: [room_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user UserT  @relation(name: "reservedRoom", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
-model rooms {
-  id           Int            @id @default(autoincrement())
-  room_number  String         @unique @db.VarChar(10)
-  room_type    String         @db.VarChar(50)
-  price        Decimal        @db.Decimal(10, 2)
-  is_available Boolean?       @default(true)
-  created_at   DateTime?      @default(now()) @db.Timestamp(6)
-  reserve_room reserve_room[]
+model RoomsM {
+  id           String    @id @default(uuid())
+  room_number  String    @unique @db.VarChar(10)
+  room_type    String    @db.VarChar(50)
+  price        Decimal   @db.Decimal(10, 2)
+  is_available Boolean?  @default(true)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  Reserve_roomM Reserve_roomM[]
 }
 
-model users {
-  id           Int            @id @default(autoincrement())
-  name         String         @db.VarChar(100)
-  email        String         @unique @db.VarChar(100)
-  phone        String?        @db.VarChar(20)
-  created_at   DateTime?      @default(now()) @db.Timestamp(6)
-  password     String         @default("") @db.VarChar(255)
-  reserve_room reserve_room[]
+model UserT {
+  id       String  @id @default(uuid())
+  username String  @unique
+  password String
+  idCard   String?
+  fname    String
+  lname    String
+  email    String?
+  tel      String?
+
+  isActive                  Boolean                   @default(true)
+  userRoles                 UserRoleM[]               @relation(name: "UserUserRole")
+  roles                     RoleM[]                   @relation(name: "OwnerRoleM")
+  permissions               PermissionM[]             @relation(name: "OwnerPermissionM")
+  rolePermissions           RolePermissionM[]         @relation(name: "OwnerRolePermissionM")
+  userOwnedRoles            UserRoleM[]               @relation(name: "OwnerUserRole")
+
+  activityLogsActing ActivityLogT[] @relation("actingUser")
+  activityLogsTarget ActivityLogT[] @relation("targetUser")
+  reserve_room Reserve_roomM[]      @relation(name: "reservedRoom")
+
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @default(now()) @updatedAt
+  deletedAt DateTime?
 }
+
+model RolePermissionM {
+  roleId       String
+  role         RoleM       @relation(fields: [roleId], references: [id])
+  permissionId String
+  permission   PermissionM @relation(fields: [permissionId], references: [id])
+
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @default(now()) @updatedAt
+  deletedAt DateTime?
+  ownerId   String?
+  owner     UserT?    @relation(name: "OwnerRolePermissionM", fields: [ownerId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model PermissionM {
+  id            String  @id @default(uuid())
+  name          String  @unique
+  action        EAction
+  resourceGroup String  @db.VarChar(50)
+  resource      String  @db.VarChar(50)
+
+  rolePermissions RolePermissionM[]
+  createdAt       DateTime?         @default(now())
+  updatedAt       DateTime?         @default(now()) @updatedAt
+  deletedAt       DateTime?
+  ownerId         String?
+  owner           UserT?            @relation(name: "OwnerPermissionM", fields: [ownerId], references: [id])
+}
+
+model RoleM {
+  id      String  @id @default(uuid())
+  name    String  @unique
+  isAdmin Boolean @default(true) @map("is_admin")
+
+  rolePermissions RolePermissionM[]
+  userRoles       UserRoleM[]
+
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @default(now()) @updatedAt
+  deletedAt DateTime?
+  ownerId   String?
+  owner     UserT?    @relation(name: "OwnerRoleM", fields: [ownerId], references: [id])
+}
+
+model UserRoleM {
+  roleId String
+  role   RoleM  @relation(fields: [roleId], references: [id])
+  userId String
+  user   UserT  @relation(name: "UserUserRole", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @default(now()) @updatedAt
+  deletedAt DateTime?
+  ownerId   String?
+  owner     UserT?    @relation(name: "OwnerUserRole", fields: [ownerId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+enum EAction {
+  CREATE
+  UPDATE
+  READ
+  DELETE
+}
+
+model ActivityLogT {
+  id String @id @default(cuid())
+
+  // Who performed the action
+  user   UserT?  @relation("actingUser", fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+
+  // Details about the action
+  //resourceType ResourceType? // e.g., "parcel", "user", "pickup"
+
+  activityType ActivityType
+  description  String       @db.Text // 
+
+  values Json? // New state (if applicable)
+
+  // Target user (for actions performed on users)
+  targetUser   UserT?  @relation("targetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetUserId String?
+
+  ipAddress String? @db.VarChar(45)
+  userAgent String? @db.Text
+
+  // Suspension-specific fields
+  suspensionReason  SuspensionReason?
+  suspensionDetails String?           @db.Text
+  suspendedUntil    DateTime?
+  // Additional metadata
+  metadata          Json? // Any additional context
+  status            String?           @db.VarChar(50) // Success, failure, pending, etc.
+  statusCode        Int? // HTTP status code or app-specific code
+
+  // When it happened
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+
+  @@index([userId])
+  @@index([targetUserId])
+  @@index([activityType])
+  @@index([createdAt])
+}
+
+enum ActivityType {
+  REGISTER
+  LOGIN
+  LOGOUT
+  READ
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum ResourceType {
+  MANAGE_MEMBER
+  MANAGE_DATA
+  MANAGE_ORGANIZATION
+  MANAGE_ADMIN
+  MANAGE_ROLE
+}
+
+enum SuspensionReason {
+  POLICY_VIOLATION
+  SPAM
+  FRAUD
+  INAPPROPRIATE_CONTENT
+  SECURITY_CONCERN
+  OTHER
+}
+
+
